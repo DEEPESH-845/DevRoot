@@ -1,0 +1,7 @@
+falkordb==1.8.0
+falkordblite==0.10.0
+fastapi==0.143.5
+uvicorn==0.54.0
+pytest==9.1.1
+httpx
+mcp==2.3.0
