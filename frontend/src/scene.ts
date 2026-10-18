@@ -33,7 +33,7 @@ enum NS { Dim = 0, Normal = 1, Visited = 2, Focus = 3, Hypothesis = 4, Selected 
 interface NodeRec { id: string; label: string; kind: string; name: string; pos: THREE.Vector3; target: THREE.Vector3; alert: boolean; sprite: THREE.Sprite; weight: number; frozen: boolean }
 interface EdgeRec { src: string; dst: string; type: string; async: boolean }
 
-export interface SceneOptions { onPick: (id: string | null) => void; reducedMotion: boolean }
+export interface SceneOptions { onPick: (id: string | null) => void; onHover?: (id: string | null, x: number, y: number) => void; reducedMotion: boolean }
 
 export class GraphScene {
   readonly particlesStatus: string;
@@ -68,6 +68,7 @@ export class GraphScene {
   private selected: string | null = null;
   private hovered: string | null = null;
   private pixelStream = false;
+  private focusCount = 0;
   private disposed = false;
   private resizeObs: ResizeObserver;
 
@@ -205,6 +206,7 @@ export class GraphScene {
       if (id === this.selected) st = NS.Selected;
       this.nodeState.set(id, st);
     }
+    this.focusCount = [...this.nodeState.entries()].filter(([id, st]) => st === NS.Focus && this.nodes.get(id)!.label !== 'Service').length;
     if (cur?.focus.length) this.focusOn(cur.focus);
     if (this.pixelStream) this.drawHud(last ?? null, scenes.length);
     this.rebuild();
@@ -225,6 +227,26 @@ export class GraphScene {
   }
 
   has(id: string) { return this.nodes.has(id); }
+
+  describe(id: string) {
+    const n = this.nodes.get(id);
+    return n && { id: n.id, label: n.label, kind: n.kind, name: n.name, frozen: n.frozen, alert: n.alert };
+  }
+
+  /** Frame every node currently in the scene. */
+  fit() {
+    const pts = [...this.nodes.values()].map(n => n.target);
+    if (!pts.length) return;
+    const box = new THREE.Box3().setFromPoints(pts);
+    const c = box.getCenter(new THREE.Vector3());
+    const r = box.getBoundingSphere(new THREE.Sphere()).radius;
+    const fov = THREE.MathUtils.degToRad(this.camera.fov);
+    const fit = Math.max(r / Math.sin(fov / 2), r / Math.sin(Math.atan(Math.tan(fov / 2) * this.camera.aspect))) * 0.82;
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.controls.target.copy(c);
+    this.camera.position.copy(c).add(dir.multiplyScalar(Math.min(fit, this.controls.maxDistance)));
+    this.camGoal = null;
+  }
 
   dispose() {
     this.disposed = true;
@@ -265,7 +287,7 @@ export class GraphScene {
     }
     if (label === 'FailureMode') {
       const n = [...this.nodes.values()].filter(x => x.label === 'FailureMode').length;
-      const p = new THREE.Vector3(-10 + n * 7, -12.5, 2);
+      const p = new THREE.Vector3(-13 + n * 9, -12.5, 2);
       return this.addNode({ ...e, label }, anchor, p);
     }
     const k = this.anchors.get(anchorId ?? '') ?? 0;
@@ -284,7 +306,7 @@ export class GraphScene {
   private addNode(e: { id: string; label: string; name: string; kind?: string }, start: THREE.Vector3, target: THREE.Vector3) {
     if (this.nodes.size >= MAX_NODES) return;
     const kind = e.label === 'Service' ? (e.kind ?? 'service') : e.label;
-    const text = e.label === 'Service' ? e.name : `${e.id}  ${e.name ?? ''}`;
+    const text = e.label === 'Service' || e.label === 'FailureMode' ? e.name : `${e.id}  ${e.name ?? ''}`;
     const sprite = makeLabel(text.length > 48 ? text.slice(0, 46) + '…' : text, e.label === 'Service');
     this.scene.add(sprite);
     const rec: NodeRec = { id: e.id, label: e.label, kind, name: e.name, pos: start.clone(), target: target.clone(), alert: false, sprite, weight: 0, frozen: false };
@@ -351,8 +373,9 @@ export class GraphScene {
       n.pos.lerp(n.target, k);
       pos.setXYZ(i, n.pos.x, n.pos.y, n.pos.z);
       const st = this.nodeState.get(id) ?? NS.Normal;
-      const show = n.label === 'Service' || st >= NS.Focus || id === this.hovered || n.label === 'Incident' || n.label === 'FailureMode'
-        || (n.label === 'Deployment' && st >= NS.Visited);
+      // label rules: services always; everything else only when it is the answer, selected, hovered, or one of few focused nodes
+      const show = n.label === 'Service' || st === NS.Hypothesis || st === NS.Selected || id === this.hovered
+        || (st === NS.Focus && this.focusCount <= 6) || (n.label === 'FailureMode' && st >= NS.Visited);
       const mat = n.sprite.material;
       mat.opacity += ((show ? (st === NS.Dim ? 0.35 : 0.92) : 0) - mat.opacity) * k;
       n.sprite.visible = mat.opacity > 0.02;
@@ -405,7 +428,7 @@ export class GraphScene {
     if (!this.renderer.capabilities.isWebGL2 || !gl.getExtension('EXT_color_buffer_float')) return 'off (no float render targets)';
     const cores = navigator.hardwareConcurrency ?? 4;
     const mobile = /Mobi|Android/i.test(navigator.userAgent);
-    const SIZE = mobile || cores <= 4 ? 48 : 96; // 2304 or 9216 particles
+    const SIZE = mobile || cores <= 4 ? 40 : 64; // 1600 or 4096 particles: enough to show flow, not a storm
     const gpu = new GPUComputationRenderer(SIZE, SIZE, this.renderer);
     const init = gpu.createTexture();
     const seeds = gpu.createTexture();
@@ -482,16 +505,16 @@ export class GraphScene {
       ctx.fillStyle = i < idx ? '#3a8fa0' : i === idx ? '#45d4e8' : '#2a2f3b';
       ctx.fillRect(40 + i * 104, 34, 92, 6);
     });
-    ctx.font = '600 22px "JetBrains Mono", monospace'; ctx.fillStyle = '#8a93a8';
+    ctx.font = '600 22px "IBM Plex Mono", monospace'; ctx.fillStyle = '#8a93a8';
     ctx.fillText(s ? `STEP ${s.seq} · ${s.phase.toUpperCase()}` : 'AWAITING INVESTIGATION', 40, 82);
     const status = s?.evidence_status ?? 'collecting';
     ctx.fillStyle = status === 'supported' ? '#f5b544' : status === 'insufficient' ? '#ff7a59' : '#45d4e8';
     ctx.textAlign = 'right'; ctx.fillText(status === 'supported' ? 'HYPOTHESIS · EVIDENCE-SUPPORTED' : status.toUpperCase(), 984, 82); ctx.textAlign = 'left';
-    ctx.font = '600 36px "Instrument Sans", system-ui, sans-serif'; ctx.fillStyle = '#eef1f7';
+    ctx.font = '600 36px "IBM Plex Sans", system-ui, sans-serif'; ctx.fillStyle = '#eef1f7';
     ctx.fillText(clip(ctx, s?.title ?? 'Ask DevRoot to investigate an incident', 944), 40, 134);
-    ctx.font = '400 25px "Instrument Sans", system-ui, sans-serif'; ctx.fillStyle = '#b7bfd0';
+    ctx.font = '400 25px "IBM Plex Sans", system-ui, sans-serif'; ctx.fillStyle = '#b7bfd0';
     wrap(ctx, s?.annotation ?? 'The scene is driven only by investigation state streamed from FalkorDB queries.', 40, 178, 944, 34, 3);
-    ctx.font = '500 18px "JetBrains Mono", monospace'; ctx.fillStyle = '#5d6578';
+    ctx.font = '500 18px "IBM Plex Mono", monospace'; ctx.fillStyle = '#5d6578';
     ctx.fillText(`agent-directed local WebGL · ${n} state update(s) · no model-generated frames`, 40, 282);
     this.hud.tex.needsUpdate = true;
   }
@@ -554,6 +577,10 @@ export class GraphScene {
 
   private onMove = (ev: PointerEvent) => {
     const id = this.pick(ev);
+    if (id !== this.hovered || id) {
+      const r = this.renderer.domElement.getBoundingClientRect();
+      this.opts.onHover?.(id, ev.clientX - r.left, ev.clientY - r.top);
+    }
     this.hovered = id;
     this.renderer.domElement.style.cursor = id ? 'pointer' : 'grab';
   };
@@ -575,7 +602,7 @@ function key(a: string, b: string) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
 function makeLabel(text: string, primary: boolean): THREE.Sprite {
   const c = document.createElement('canvas');
   const ctx = c.getContext('2d')!;
-  const font = `${primary ? 600 : 500} 40px ${primary ? '"Instrument Sans", system-ui' : '"JetBrains Mono", monospace'}`;
+  const font = `${primary ? 600 : 500} 40px ${primary ? '"IBM Plex Sans", system-ui' : '"IBM Plex Mono", monospace'}`;
   ctx.font = font;
   c.width = Math.ceil(ctx.measureText(text).width) + 24; c.height = 56;
   ctx.font = font; ctx.fillStyle = primary ? '#c9cfdb' : '#9aa3b5'; ctx.textBaseline = 'middle';

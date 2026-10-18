@@ -43,10 +43,17 @@ The Docker image build has not been run locally (Docker isn't installed on the d
 
 Dev mode with hot reload: run `cd backend && ../.venv/bin/uvicorn devroot.app:app --reload` and `cd frontend && npm run dev` (Vite proxies `/api`).
 
+## Interface
+
+![Investigation workspace](docs/screens/after-investigation.png)
+
+Four views share one persistent WebGL graph: **Overview** (open incidents, chokepoints), **Investigation** (diagnosis-first panel and proof chain),
+**Fire drills**, and **History** (past hypotheses, approved actions). See `docs/DEVROOT_DESIGN_REVIEW.md`.
+
 ## Two-minute demo
 
-1. Open http://127.0.0.1:8000. You see the Northstar Labs service graph. Particles flow along `DEPENDS_ON` edges; dashed edges are async (queued); the alerting services (checkout, gateway) jitter.
-2. Click **Run investigation** (the default request asks about the payment latency spike).
+1. Open http://127.0.0.1:8000 (Overview), then click **Investigate INC-2041**. You see the Northstar Labs service graph. Particles flow along `DEPENDS_ON` edges; dashed edges are async (queued); the alerting services (checkout, gateway) jitter.
+2. The investigation starts immediately. You can also type a question in the header's ask box.
 3. Watch 9 steps stream in. Each step is a read-only Cypher query; its text, parameters, row count and timing are in **Cypher trace**.
 4. The verdict: **DEP-884 payment-service v4.12.0** (score 95.2, heuristic). It ships `CFG-311 ledger.client.pool.max_size 50 → 8`.
    The page fired on *checkout*, but the cause is one synchronous hop downstream.

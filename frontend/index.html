@@ -5,96 +5,72 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DevRoot</title>
   <meta name="description" content="Root cause, proven by the graph. Graph-native incident investigation on FalkorDB." />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 3v7m0 0-6 5m6-5 6 5m-12 0v4m12-4v4M12 10v9%22 stroke=%22%23a98bff%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 3v7m0 0-6 5m6-5 6 5m-12 0v4m12-4v4M12 10v9%22 stroke=%22%238f7cff%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3v7m0 0-6 5m6-5 6 5m-12 0v4m12-4v4M12 10v9" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><circle cx="12" cy="3.5" r="1.8" fill="currentColor"/></svg>
-      <span class="name">DevRoot</span><span class="tag">Root cause, proven by the graph.</span>
+<div class="shell">
+  <nav class="sidebar" aria-label="Primary">
+    <div>
+      <div class="wordmark">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3v7m0 0-6 5m6-5 6 5m-12 0v4m12-4v4M12 10v9" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><circle cx="12" cy="3.5" r="1.8" fill="currentColor"/></svg>
+        <b>DevRoot</b>
+      </div>
+      <p class="env">Northstar Labs, synthetic data</p>
     </div>
-    <div id="incident-chip" class="chip" hidden></div>
-    <div class="spacer"></div>
-    <div class="modes" role="tablist" aria-label="View mode">
-      <button role="tab" id="mode-workspace" aria-selected="true">Workspace</button>
-      <button role="tab" id="mode-pixel" aria-selected="false">PixelStream</button>
+    <div class="nav">
+      <a href="#/overview" data-view="overview"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor"/><rect x="9" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor"/><rect x="2" y="9" width="12" height="5" rx="1" fill="none" stroke="currentColor"/></svg>Overview</a>
+      <a href="#/investigation" data-view="investigation"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor"/><path d="m10.5 10.5 3.5 3.5" stroke="currentColor"/></svg>Investigation</a>
+      <a href="#/drills" data-view="drills"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>Fire drills</a>
+      <a href="#/history" data-view="history"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor"/><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" fill="none"/></svg>History<span class="count" id="nav-history"></span></a>
     </div>
-    <div id="health" class="health" title="FalkorDB status">FalkorDB …</div>
-  </header>
+    <div class="status" id="status" aria-live="polite"><span><i class="dot"></i>Connecting to FalkorDB…</span></div>
+  </nav>
 
-  <main class="layout">
-    <aside class="left" aria-label="Investigation input">
-      <form id="ask">
-        <label for="q">Investigate</label>
-        <textarea id="q" rows="4" maxlength="500">Investigate the payment latency spike after the latest deployment. Find the most likely root cause, identify affected services, and show the evidence.</textarea>
-        <button type="submit" id="go" class="primary">Run investigation</button>
-      </form>
-      <div class="examples" aria-label="Example requests">
-        <button data-q="Why is checkout slow? INC-2041">Why is checkout slow? INC-2041</button>
-        <button data-q="Show me how the latest deployment caused the payment incident, which systems are affected, and where the evidence leads.">How did the latest deploy cause the payment incident?</button>
-        <button data-q="Investigate delayed order notifications">Delayed order notifications</button>
-        <button data-q="Kubernetes etcd quorum loss">An incident the graph doesn't contain</button>
-      </div>
-      <section class="drill">
-        <h2>Fire drill <span class="muted">(prove it isn't scripted)</span></h2>
-        <p class="muted small">Inject a fresh incident into FalkorDB. The graph picks where the symptom surfaces; the agent has to find the cause.</p>
-        <label class="sr-only" for="drill-svc">Service to break</label>
-        <select id="drill-svc"></select>
-        <label class="sr-only" for="drill-fm">Failure mechanism</label>
-        <select id="drill-fm"><option value="fm-pool-exhaustion">connection-pool exhaustion</option><option value="fm-retry-storm">retry amplification</option></select>
-        <div class="row"><button id="drill-go" type="button" class="primary">Inject & investigate</button><button id="drill-reset" type="button">Reset drills</button></div>
-        <p id="drill-msg" class="muted small" aria-live="polite"></p>
-      </section>
-      <section>
-        <h2>Open incidents</h2>
-        <ul id="incidents" class="list"></ul>
-      </section>
-      <section>
-        <h2>Investigation memory <span class="muted">(hypotheses, not facts)</span></h2>
-        <ul id="memory" class="list"><li class="muted">None yet.</li></ul>
-      </section>
-    </aside>
+  <div class="main">
+    <header class="header" id="header"></header>
 
-    <section class="stage" aria-label="Graph visualisation">
-      <div id="canvas" class="canvas"></div>
-      <div id="stage-status" class="stage-status"><span class="phase">Idle</span><span id="stage-title">System graph · Northstar Labs (synthetic)</span></div>
-      <div class="legend" aria-hidden="true">
-        <span><i class="dot svc"></i>service</span><span><i class="dot alert"></i>alert</span><span><i class="dot change"></i>change</span>
-        <span><i class="dot sig"></i>signal</span><span><i class="dot fm"></i>mechanism / hypothesis</span><span><i class="dash"></i>async dep</span>
+    <section class="stage" aria-label="Service graph">
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div id="canvas" class="canvas"></div>
+        <div class="phase-line" id="phase-line"></div>
+        <div class="graph-tools" role="toolbar" aria-label="Graph view">
+          <button class="btn ghost small" id="fit" title="Fit the graph to the view">Fit</button>
+          <button class="btn ghost small" id="reset" title="Clear focus and selection">Reset</button>
+          <button class="btn ghost small" id="pixel" aria-pressed="false" title="Agent-directed full-canvas mode (local WebGL, no generated frames)">PixelStream</button>
+        </div>
+        <div class="legend" aria-hidden="true">
+          <span><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#d5dbe8"/></svg>service</span>
+          <span><svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="#9db4d0"/></svg>database</span>
+          <span><svg width="10" height="10"><circle cx="5" cy="5" r="3.5" fill="none" stroke="#8ea2ff" stroke-width="1.5"/></svg>queue / mechanism</span>
+          <span><svg width="10" height="10"><path d="M5 0 10 5 5 10 0 5Z" fill="#a98bff"/></svg>change / external</span>
+          <span><svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="#45d4e8"/></svg>signal</span>
+          <span><svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="#ff7a59"/></svg>alert</span>
+          <span><svg width="18" height="10"><path d="M0 5h18" stroke="#8ea2ff" stroke-dasharray="3 3"/></svg>async dependency</span>
+        </div>
+        <div class="hovercard" id="hovercard" hidden></div>
+        <aside class="inspector" id="inspector" hidden aria-label="Entity inspector"></aside>
+        <div class="fallback" id="fallback" hidden></div>
       </div>
-      <div id="entity" class="entity" hidden></div>
-      <div id="fallback" class="fallback" hidden></div>
-      <div class="replay" aria-label="Forensic replay">
-        <button id="r-prev" aria-label="Previous step" disabled>◀</button>
-        <button id="r-play" aria-label="Play replay" disabled>Replay</button>
-        <button id="r-next" aria-label="Next step" disabled>▶</button>
-        <ol id="steps" class="steps"></ol>
+      <div class="transport" aria-label="Replay and time travel">
+        <div class="ctl">
+          <button class="btn small" id="r-prev" aria-label="Previous step" disabled>◀</button>
+          <button class="btn small" id="r-play" disabled>Replay</button>
+          <button class="btn small" id="r-next" aria-label="Next step" disabled>▶</button>
+        </div>
+        <ol class="steps" id="steps" aria-label="Investigation steps"></ol>
+        <div class="time empty" id="time">Run an investigation to replay it here and scrub through the incident timeline.</div>
       </div>
-      <p id="live" class="sr-only" aria-live="polite"></p>
     </section>
 
-    <aside class="right" aria-label="Findings">
-      <div id="summary" class="summary"><p class="muted">Run an investigation. DevRoot walks FalkorDB from the alert to the change that explains it, and shows every hop.</p></div>
-      <div class="tabs" role="tablist">
-        <button role="tab" data-tab="hyp" aria-selected="true">Hypotheses</button>
-        <button role="tab" data-tab="ev" aria-selected="false">Evidence</button>
-        <button role="tab" data-tab="blast" aria-selected="false">Blast radius</button>
-        <button role="tab" data-tab="trace" aria-selected="false">Cypher trace</button>
-      </div>
-      <div id="tab-hyp" class="tab"></div>
-      <div id="tab-ev" class="tab" hidden></div>
-      <div id="tab-blast" class="tab" hidden></div>
-      <div id="tab-trace" class="tab" hidden></div>
-    </aside>
-  </main>
-
-  <section class="timeline" aria-label="Timeline"><div id="timeline"></div></section>
-
-  <dialog id="rollback" aria-labelledby="rb-title"><div id="rb-body"></div><form method="dialog"><button class="primary">Close preview</button></form></dialog>
-  <script type="module" src="/src/main.ts"></script>
+    <aside class="panel" id="panel" aria-label="Context"></aside>
+  </div>
+</div>
+<p class="sr-only" id="live" aria-live="polite"></p>
+<dialog id="rollback" aria-labelledby="rb-title"><div id="rb-body"></div><form method="dialog"><button class="btn primary">Close preview</button></form></dialog>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

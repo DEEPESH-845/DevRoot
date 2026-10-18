@@ -148,6 +148,14 @@ def action_record(body: ActionIn):
     return guard(lambda: agent.record_action(gr, body.investigation_id, body.type))
 
 
+@app.get("/api/actions")
+def action_list():
+    gr = g()
+    return guard(lambda: agent._rows(gr.ro_query(
+        "MATCH (a:Action) OPTIONAL MATCH (a)-[:TARGETS]->(n) RETURN a.id AS id, a.type AS type, a.name AS name, "
+        "a.status AS status, a.ts AS ts, collect(n.id) AS targets ORDER BY ts DESC LIMIT 50")))
+
+
 @app.post("/api/actions/lift-freezes")
 def action_lift():
     gr = g()
