@@ -29,6 +29,12 @@ let incidentId: string | null = null;
 let memory: (Result['prior_investigations'][number] & { incident: string })[] = [];
 let crit: { id: string; betweenness: number; pagerank: number }[] = [];
 let overlayLabel = '';
+let overlayQuery: string | null = null; // trace query name (or 'entity' / 'time') behind the current overlay
+let schema: { graph: string; version: string | null; mode: string; labels: { label: string; n: number }[]; relationships: { type: string; n: number }[] } | null = null;
+const ENTITY_CYPHER = `MATCH (n {id: $id})
+OPTIONAL MATCH (n)-[r]-(m) WHERE NOT m:Investigation
+RETURN properties(n), labels(n),
+       collect({type: type(r), id: m.id, label: labels(m)[0]})[0..40]`;
 
 // ------------------------------------------------------------------ helpers
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -64,7 +70,8 @@ async function boot() {
 
 async function refreshAll() {
   try {
-    [base, health, crit] = await Promise.all([api<GraphData>('/api/graph'), api<{ nodes: number; edges: number }>('/api/health'), api<typeof crit>('/api/criticality')]);
+    [base, health, crit, schema] = await Promise.all([api<GraphData>('/api/graph'), api<{ nodes: number; edges: number }>('/api/health'),
+      api<typeof crit>('/api/criticality'), api<NonNullable<typeof schema>>('/api/schema')]);
     scene?.setBase(base);
     scene?.apply(scenes.slice(0, cursor));
     await loadMemory();
@@ -90,7 +97,8 @@ async function loadMemory() {
 
 function renderStatus() {
   $('#status').innerHTML = health
-    ? `<span><i class="dot ok"></i>FalkorDB connected</span><span>${health.nodes} nodes, ${health.edges} relationships</span>
+    ? `<span><i class="dot ok"></i>FalkorDB ${esc(schema?.version ?? '')} connected</span><span>${esc(schema?.mode ?? '')}</span>
+       <span>Graph “${esc(schema?.graph ?? 'devroot')}”: ${health.nodes} seed nodes, ${health.edges} relationships</span>
        <span>${base?.services.length ?? 0} services, ${base?.incidents.length ?? 0} open incidents</span>
        <span title="GPU particle status">Particles: ${esc(scene?.particlesStatus ?? 'off (no WebGL)')}</span>`
     : `<span><i class="dot bad"></i>FalkorDB unavailable</span><span>Investigations are disabled until the graph is reachable.</span>`;
@@ -119,7 +127,8 @@ function renderHeader() {
   if (view === 'overview') {
     const top = topIncident();
     h.innerHTML = `<div class="titles"><h1><span class="t">System overview</span></h1>
-      <p class="sub">${base ? `${base.services.length} services and ${base.incidents.length} open incidents, read live from FalkorDB.` : 'Waiting for the graph.'}</p></div>
+      <p class="sub">${top ? `${base!.incidents.length} incident${base!.incidents.length > 1 ? 's are' : ' is'} open. The loudest is ${esc(top.id)}, ${esc(top.name.toLowerCase())}, since ${hhmm(top.at)} UTC.`
+        : base ? 'Nothing is on fire. Every service below is read live from FalkorDB.' : 'Connecting to FalkorDB.'}</p></div>
       <div class="tools">${top ? `<button class="btn primary" data-investigate="${esc(top.id)}">Investigate ${esc(top.id)}</button>` : ''}
       <button class="btn" data-explore="1">Explore service graph</button></div>`;
   } else if (view === 'investigation') {
@@ -175,8 +184,20 @@ function overviewPanel() {
       <ul class="choke">${crit.filter(c => c.betweenness > 0).slice(0, 5).map(c => `<li data-id="${esc(c.id)}" tabindex="0" role="button">
         <span class="nm">${esc(svcName(c.id))}</span><span class="b"><i style="width:${(c.betweenness / maxB) * 100}%"></i></span><span class="v">${c.betweenness}</span></li>`).join('')}</ul>
       <p class="meta" style="margin-top:8px">Sampled estimate with a fixed seed. Node size in the graph uses the same score.</p></section>
-    <section><h2>How DevRoot answers</h2><p class="lede">Every investigation is a fixed plan of read-only Cypher queries: alert, dependency paths, recent changes,
-      matching signals, history. Each conclusion links back to the nodes that produced it.</p></section>`;
+    ${insideFalkor()}`;
+}
+
+function insideFalkor() {
+  if (!schema) return '';
+  const own = new Set(['Investigation', 'Action']);
+  const ownRel = new Set(['HYPOTHESIZED', 'INVESTIGATED', 'FOR_INVESTIGATION', 'TARGETS']);
+  return `<section class="inside"><h2>Inside FalkorDB</h2>
+    <p class="lede">The whole product is one graph, <span class="id">${esc(schema.graph)}</span>, on FalkorDB ${esc(schema.version ?? '')} (${esc(schema.mode)}).
+      Incidents, services, changes and signals are nodes; how they relate is what DevRoot reasons over. Nothing here is cached in the browser.</p>
+    <div class="cols"><div><h3>Nodes by label</h3><dl>${schema.labels.map(l => `<dt class="${own.has(l.label) ? 'own' : ''}">${esc(l.label)}</dt><dd>${l.n}</dd>`).join('')}</dl></div>
+      <div><h3>Relationships</h3><dl>${[...schema.relationships].sort((a, b) => Number(ownRel.has(a.type)) - Number(ownRel.has(b.type)) || b.n - a.n)
+        .slice(0, 14).map(r => `<dt class="${ownRel.has(r.type) ? 'own' : ''}">${esc(r.type)}</dt><dd>${r.n}</dd>`).join('')}</dl></div></div>
+    <p class="meta">Greyed entries are DevRoot's own records (past investigations, approved actions), written back into the same graph.</p></section>`;
 }
 
 function investigationPanel() {
@@ -191,8 +212,8 @@ function investigationPanel() {
       <p class="meta" style="margin-top:6px">DevRoot reports what the graph is missing instead of guessing.</p></div></section><section>${suggestions()}</section>`;
   }
   if (!result) {
-    return `<div class="empty"><h2>Start from a symptom</h2>
-      <p>Describe what is wrong, or name an incident. DevRoot walks the graph from the alert to the change that explains it, and shows each hop.</p>
+    return `<div class="empty"><h2>What are you seeing?</h2>
+      <p>Name an incident or describe the symptom in your own words. DevRoot starts at the alert and walks FalkorDB, one query at a time, until it finds a change that explains it.</p>
       ${suggestions()}</div>`;
   }
   return diagnosis() + tabs();
@@ -213,17 +234,19 @@ function chainHtml(): string {
   if (!result?.evidence_chain.length) return '';
   const kind = (id: string) => id.startsWith('ALR') ? 'alert' : id.startsWith('CFG') ? 'config' : id.startsWith('DEP') ? 'change'
     : id.startsWith('fm-') ? 'fm' : /^(MET|LOG)/.test(id) ? 'signal' : 'svc';
-  const hop = (id: string, label = id) => `<button class="hop k-${kind(id)}" data-id="${esc(id)}" title="${esc(id)}">${esc(label)}</button>`;
-  const rel = (t: string) => `<span class="rel">${t}</span>`;
-  const rows = result.evidence_chain.filter((r, i, a) => a.findIndex(x => x.element === r.element) === i).slice(0, 2);
-  const first = rows[0];
-  const svcs = first.path.slice(0, -1);
-  const head = [hop(first.alert), rel('FIRED_ON'), ...svcs.flatMap((s, i) => [hop(s, svcName(s)), rel(i < svcs.length - 1 ? 'DEPENDS_ON' : 'DEPLOYED_TO ←')]),
-    hop(first.path[first.path.length - 1])].join('');
-  const tails = rows.map(r => [rel('SHIPS'), hop(r.element), rel('TOUCHES'), hop(r.fm, r.fm.replace('fm-', '')), rel('← INDICATES'),
-    ...r.signals.map(s => hop(s))].join('')).join('<span style="flex-basis:100%;height:2px"></span>');
-  return `<div class="chain" aria-label="Evidence path from alert to cause">${head}${tails}</div>
-    <p class="chain-caption">One Cypher query returned this path. <button class="btn ghost small" data-chain="1">Show on graph</button></p>`;
+  const n = (id: string, label = id) => `(<button class="n k-${kind(id)}" data-id="${esc(id)}" title="Inspect ${esc(id)}">${esc(label)}</button>)`;
+  const r = (t: string) => `<span class="r">${t}</span>`;
+  const rows = result.evidence_chain.filter((x, i, a) => a.findIndex(y => y.element === x.element) === i).slice(0, 2);
+  const first = rows[0], svcs = first.path.slice(0, -1);
+  const lines = [
+    n(first.alert) + r('-[:FIRED_ON]->') + svcs.map(s => n(s, svcName(s))).join(r('-[:DEPENDS_ON]->')),
+    r('<-[:DEPLOYED_TO]-') + n(first.path[first.path.length - 1]),
+    ...rows.map(x => r('-[:SHIPS]->') + n(x.element) + r('-[:TOUCHES]->') + n(x.fm, x.fm.replace('fm-', '')) + r('<-[:INDICATES]-')
+      + x.signals.map(sg => n(sg)).join(r(', '))),
+  ];
+  return `<div class="path" aria-label="Evidence path from alert to cause">${lines.map(l => `<div class="ln">${l}</div>`).join('')}</div>
+    <p class="chain-caption">This is the path FalkorDB returned for the <span class="id">evidence_chain</span> query, not a summary of it.
+      <button class="btn ghost small" data-chain="1">Light it up on the graph</button></p>`;
 }
 
 function diagnosis(): string {
@@ -232,13 +255,16 @@ function diagnosis(): string {
   const mins = Math.round((r.incident.ts - top.ts) / 60);
   const matched = top.supporting.filter(s => s.includes('INDICATES')).length;
   const history = top.supporting.find(s => s.startsWith('[INC-'));
-  const reasons = [
-    top.reach && top.explains_symptom ? `<li class="pro"><span class="m">+</span><span>Synchronously reachable from the alert: ${top.reach.path.map(svcName).map(esc).join(' → ')}.</span></li>` : '',
-    matched ? `<li class="pro"><span class="m">+</span><span>${matched} observed signals indicate a mechanism this change touches.</span></li>` : '',
-    history ? `<li class="pro"><span class="m">+</span><span>${refs(history.split(';')[0])}.</span></li>` : '',
-    ...top.contradicting.slice(0, 2).map(c => `<li class="con"><span class="m">−</span><span>${refs(c)}</span></li>`),
-    ...top.unknowns.slice(0, 2).map(u => `<li class="unk"><span class="m">?</span><span>${refs(u)}</span></li>`),
-  ].join('');
+  const pro = [
+    top.reach && top.explains_symptom ? `The alert can reach it: ${top.reach.path.map(svcName).map(esc).join(' calls ')} synchronously.` : '',
+    matched ? `${matched} signals recorded after the change point at a failure mode the change touches.` : '',
+    history ? `It has happened before: ${refs(history.split(';')[0].replace(' exhibited the same mechanism', ' looked the same'))}.` : '',
+  ].filter(Boolean);
+  const con = top.contradicting.slice(0, 2).map(refs);
+  const unk = top.unknowns.slice(0, 2).map(refs);
+  const reasons = `<div class="why"><h3>Why it leads</h3><ul class="pro">${pro.map(x => `<li>${x}</li>`).join('')}</ul>
+    <h3>What argues against it</h3><ul class="con">${con.length ? con.map(x => `<li>${x}</li>`).join('') : '<li>Nothing in the graph contradicts it yet.</li>'}</ul>
+    <h3>What we still don't know</h3><ul class="unk">${unk.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
   const runner = r.candidates[1];
   return `<section class="verdict">
     <div class="state">${supported ? '<span class="badge hypothesis">Leading hypothesis</span> <span class="meta">supported by graph evidence, not verified</span>'
@@ -250,7 +276,7 @@ function diagnosis(): string {
       <div class="terms">${Object.entries(top.terms).map(([k, v]) => `<span><i style="background:${TERM_COLORS[k]}"></i>${k} ${v}</span>`).join('')}
       <span class="note">Heuristic evidence score, not a probability.${runner ? ` Runner-up ${esc(runner.id)} scored ${runner.score}.` : ''}</span></div></div>
     ${chainHtml()}
-    <ul class="reasons">${reasons}</ul>
+    ${reasons}
     <p class="next"><b>Verify next.</b> ${refs(top.next_step)}</p>
     <div class="row"><button class="btn" data-blast="${esc(top.service)}">Blast radius</button>
       <button class="btn" data-rollback="${esc(top.id)}">Preview rollback</button>
@@ -353,6 +379,7 @@ async function loadActionsList() {
 
 // ------------------------------------------------------------------ phase line + transport
 function renderPhase() {
+  renderLens();
   const s = scenes[cursor - 1];
   const el = $('#phase-line');
   const [label, text] = overlayLabel.split('|');
@@ -360,6 +387,38 @@ function renderPhase() {
   // the queries finish in milliseconds; once the result is in, the canvas is replaying recorded state, and says so
   else if (s) el.innerHTML = `<span class="badge ${s.phase === 'complete' ? 'hypothesis' : 'active'}">${result ? 'Replay' : 'Query'} ${s.seq} of ${scenes.length}</span><span>${esc(s.title)}</span>`;
   else el.innerHTML = `<span class="meta">${base ? 'Service graph. Node size shows how many dependency paths run through a service.' : ''}</span>`;
+}
+
+const highlight = (q: string) => esc(q)
+  .replace(/\b(MATCH|OPTIONAL MATCH|WHERE|RETURN|WITH|UNWIND|CALL|YIELD|ORDER BY|LIMIT|AS|AND|OR|NOT|IN|DISTINCT|collect|count|all|length|nodes|relationships|properties|labels|type)\b/g, '<span class="kw">$1</span>')
+  .replace(/(:[A-Z][A-Za-z_|]+)/g, '<span class="lb">$1</span>')
+  .replace(/(\$[a-z]+)/g, '<span class="pm">$1</span>');
+
+function renderLens() {
+  const el = $('#lens');
+  const byName = (name: string) => trace.find(t => t.query === name);
+  let steps: TraceStep[] = [];
+  let note = '';
+  if (overlayQuery === 'entity') {
+    el.innerHTML = `<div class="lh"><b>FalkorDB</b><span class="nm">entity lookup</span><span class="st">GRAPH.RO_QUERY</span></div><pre>${highlight(ENTITY_CYPHER)}</pre>`;
+    return;
+  }
+  if (overlayQuery === 'time') note = 'Time travel filters the rows FalkorDB already returned by their timestamps. No new query runs.';
+  else if (overlayQuery) steps = [byName(overlayQuery)].filter((t): t is TraceStep => !!t);
+  else {
+    const s = scenes[cursor - 1];
+    if (!s) { el.innerHTML = ''; return; }
+    steps = (s.queries ?? []).map(n => trace.find(t => t.step === n)).filter((t): t is TraceStep => !!t);
+    if (!steps.length) note = s.phase === 'ranking' ? 'Ranking runs in Python over the rows above, using the five documented terms. No query.'
+      : 'Uses rows from the previous queries. No new query.';
+  }
+  if (note) { el.innerHTML = `<div class="lh"><b>FalkorDB</b><span class="nm">no query</span></div><p class="none">${esc(note)}</p>`; return; }
+  if (!steps.length) { el.innerHTML = ''; return; }
+  const t = steps[steps.length - 1];
+  const rows = steps.reduce((a, x) => a + x.rows, 0), ms = steps.reduce((a, x) => a + x.ms, 0);
+  el.innerHTML = `<div class="lh"><b>FalkorDB</b><span class="nm">${steps.map(x => esc(x.query)).join(', ')}</span>
+    <span class="st">query ${steps.map(x => x.step).join('+')} of ${trace.length}, ${rows} rows, ${ms.toFixed(1)} ms</span></div>
+    <pre>${highlight(t.cypher)}</pre>`;
 }
 
 function renderTransport() {
@@ -408,7 +467,7 @@ function scrubTo(T: number) {
   const live = result.evidence.filter(e => e.ts <= T);
   scene?.apply(scenes, { path: live.map(e => [e.id, e.service] as [string, string]), focus: [...new Set(live.flatMap(e => [e.id, e.service]))],
     particles: T >= result.incident.ts ? 'blast' : 'trace' });
-  overlayLabel = `Time travel|Graph as recorded at ${clock(T)} UTC`;
+  overlayLabel = `Time travel|Graph as recorded at ${clock(T)} UTC`; overlayQuery = 'time';
   document.querySelectorAll<HTMLElement>('.time .tick').forEach(el => {
     const e = result!.evidence.find(x => x.id === el.dataset.focus);
     el.classList.toggle('future', !!e && e.ts > T);
@@ -421,7 +480,7 @@ function scrubTo(T: number) {
 function investigate(q: string) {
   if (run === 'running') return; // no duplicate requests
   es?.close(); stopTimer();
-  query = q; scenes = []; cursor = 0; result = null; trace = []; plan = null; runError = null; scrubT = null; overlayLabel = ''; tab = 'cand';
+  query = q; scenes = []; cursor = 0; result = null; trace = []; plan = null; runError = null; scrubT = null; overlayLabel = ''; overlayQuery = null; tab = 'cand';
   run = 'running';
   $('#inspector').hidden = true;
   scene?.select(null);
@@ -468,7 +527,7 @@ function advance() { if (cursor >= scenes.length) { stopTimer(); return; } show(
 
 function show(n: number) {
   cursor = Math.max(0, Math.min(n, scenes.length));
-  overlayLabel = ''; scrubT = null;
+  overlayLabel = ''; overlayQuery = null; scrubT = null;
   scene?.apply(scenes.slice(0, cursor));
   const s = scenes[cursor - 1];
   if (s) announce(`${s.title}. ${s.annotation}`);
@@ -505,7 +564,7 @@ function edgesOf(id: string): [string, string][] {
 async function inspect(id: string) {
   scene?.select(id);
   scene?.apply(scenes.slice(0, cursor), { path: edgesOf(id), focus: [id], particles: 'trace' });
-  overlayLabel = `Neighbourhood|${id} and its direct relationships`;
+  overlayLabel = `Neighbourhood|${id} and its direct relationships`; overlayQuery = 'entity';
   renderPhase();
   const box = $('#inspector');
   box.hidden = false;
@@ -529,7 +588,7 @@ async function inspect(id: string) {
 function closeInspector() {
   if ($('#inspector').hidden && !overlayLabel) return;
   $('#inspector').hidden = true;
-  overlayLabel = ''; scrubT = null;
+  overlayLabel = ''; overlayQuery = null; scrubT = null;
   scene?.select(null);
   scene?.apply(scenes.slice(0, cursor));
   renderPhase();
@@ -540,7 +599,7 @@ async function showBlast(sid: string) {
   try {
     const br = await api<BlastRadius>(`/api/blast-radius/${encodeURIComponent(sid)}`);
     scene?.apply(scenes.slice(0, cursor), { path: br.edges, focus: [sid, ...br.services.map(s => s.id)], particles: 'blast' });
-    overlayLabel = `Blast radius|${br.services.length} services depend on ${svcName(sid)}; propagation runs along DEPENDS_ON in reverse`;
+    overlayLabel = `Blast radius|${br.services.length} services depend on ${svcName(sid)}; propagation runs along DEPENDS_ON in reverse`; overlayQuery = 'blast_radius';
     renderPhase();
     if (result && view === 'investigation') {
       result.blast_radius = { ...br, services: br.services.map(s => ({ ...s, betweenness: crit.find(c => c.id === s.id)?.betweenness })) };
@@ -555,7 +614,7 @@ function showPath(cid: string) {
   if (!c) return;
   const p = c.reach ? [...c.reach.path, c.id] : [c.service, c.id];
   scene?.apply(scenes.slice(0, cursor), { path: p.slice(1).map((b, i) => [p[i], b] as [string, string]), focus: [cid], particles: c.explains_symptom ? 'converge' : 'trace' });
-  overlayLabel = `Path|${c.reach ? p.map(svcName).join(' → ') : `${cid} has no dependency path from the alert`}`;
+  overlayLabel = `Path|${c.reach ? p.map(svcName).join(' → ') : `${cid} has no dependency path from the alert`}`; overlayQuery = 'dependency_frontier';
   renderPhase();
 }
 
@@ -568,7 +627,7 @@ function showChain() {
     path.push([r.path[r.path.length - 1], r.element], [r.element, r.fm], ...r.signals.map(s => [s, r.fm] as [string, string]));
   }
   scene?.apply(scenes.slice(0, cursor), { path, focus: [result.top], particles: 'converge' });
-  overlayLabel = 'Evidence path|Alert to cause, then the mechanism and the signals that indicate it';
+  overlayLabel = 'Evidence path|Alert to cause, then the mechanism and the signals that indicate it'; overlayQuery = 'evidence_chain';
   renderPhase();
 }
 

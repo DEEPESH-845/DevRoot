@@ -16,6 +16,7 @@ export interface SceneState {
   particles: ParticleMode;
   hypothesis: { id: string; score: number; status: string } | null;
   evidence_status: 'collecting' | 'supported' | 'insufficient';
+  queries?: number[];
 }
 
 export interface Service { id: string; name: string; kind: string; team: string; alerts: string[]; betweenness: number; frozen: boolean }

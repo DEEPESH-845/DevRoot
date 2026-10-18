@@ -72,3 +72,17 @@ Playwright (Chromium 1243):
 - Replay, PixelStream and time travel share one scene state. Switching between them resets overlays rather than layering them.
 - The overview graph and the investigation graph are the same canvas; there is no separate "incident neighbourhood" preview.
 - Tested in Chromium only.
+
+## Pass 2: showing FalkorDB, removing template components
+- **FalkorDB lens** (bottom-left of the graph): for every replay step it shows the Cypher that produced it, with query number, rows and milliseconds.
+  Steps that ran no query say so ("Ranking runs in Python over the rows above"). Overlays show their own query (blast_radius, evidence_chain,
+  dependency_frontier, entity lookup). Time travel states that it filters returned rows and runs no new query.
+  The backend now records which trace steps produced each `SceneState` (`queries` field).
+- **Proof path typeset as Cypher:** `(ALR-9001)-[:FIRED_ON]->(checkout-service)-[:DEPENDS_ON]->(payment-service)<-[:DEPLOYED_TO]-(DEP-884)-[:SHIPS]->(CFG-311)…`
+  Every node in it is clickable, and the caption says it is the path FalkorDB returned, not a summary.
+- **Inside FalkorDB** (Overview): engine version (read from `MODULE LIST`), connection mode, graph name, and live node counts by label and
+  relationship counts by type (`GET /api/schema`). DevRoot's own write-back records are greyed.
+- **Removed:** glyph badges (?, !, ✓, pulsing dot), chip-chain hops, +/−/? marker lists, and the "How DevRoot answers" blurb.
+- **Copy in an on-call voice, built from data:** "2 incidents are open. The loudest is INC-2041, checkout latency and 5xx spike, since 14:07 UTC."
+  The reasons are grouped as "Why it leads / What argues against it / What we still don't know". The empty state asks "What are you seeing?".
+- Verified in Chromium: lens on steps 5 and 7, the evidence chain and the inspector; mobile scrollWidth 390; no console errors; 38 tests pass.

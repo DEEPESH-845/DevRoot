@@ -123,6 +123,25 @@ def rollback(cid: str):
     return guard(lambda: agent.rollback_preview(gr, cid))
 
 
+@app.get("/api/schema")
+def schema():
+    """What FalkorDB holds right now: engine version, connection mode, label and relationship counts."""
+    gr = g()
+
+    def run():
+        labels = agent._rows(gr.ro_query("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS n ORDER BY n DESC, label"))
+        rels = agent._rows(gr.ro_query("MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS n ORDER BY n DESC, type"))
+        try:
+            ver = next(m["ver"] for m in gr.execute_command("MODULE", "LIST") if m["name"] == "graph")
+            version = f"{ver // 10000}.{ver // 100 % 100}.{ver % 100}"
+        except Exception:
+            version = None
+        import os
+        return {"graph": gr.name, "version": version, "labels": labels, "relationships": rels,
+                "mode": "FalkorDB server (FALKORDB_URL)" if os.environ.get("FALKORDB_URL") else "embedded FalkorDB (falkordblite)"}
+    return guard(run)
+
+
 @app.get("/api/criticality")
 def criticality():
     """FalkorDB graph algorithms: algo.betweenness (sampled, fixed seed) + algo.pageRank over DEPENDS_ON."""

@@ -130,6 +130,7 @@ class SceneState(BaseModel):
     particles: Literal["idle", "trace", "converge", "blast"] = "trace"
     hypothesis: Optional[dict] = None  # {"id", "score", "status": "hypothesis"}
     evidence_status: Literal["collecting", "supported", "insufficient"] = "collecting"
+    queries: list[int] = []            # trace step numbers (FalkorDB queries) that produced this scene
 
 
 def _rows(res) -> list[dict]:
@@ -199,6 +200,7 @@ class Investigation:
         self.id = "INV-" + uuid.uuid4().hex[:8]
         self.trace: list[dict] = []
         self.scenes: list[dict] = []
+        self._shown = 0
 
     def q(self, name: str, params: dict) -> list[dict]:
         t0 = time.perf_counter()
@@ -208,6 +210,8 @@ class Investigation:
         return rows
 
     def scene(self, **kw) -> dict:
+        kw.setdefault("queries", [t["step"] for t in self.trace[self._shown:]])
+        self._shown = len(self.trace)
         s = SceneState(seq=len(self.scenes) + 1, **kw).model_dump()
         self.scenes.append(s)
         return {"event": "step", "data": {"scene": s, "trace": self.trace[-1] if self.trace else None}}
