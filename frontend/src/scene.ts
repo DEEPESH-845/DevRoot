@@ -122,7 +122,7 @@ export class GraphScene {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.4, 0.72);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.62, 0.55, 0.6);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
@@ -458,7 +458,7 @@ export class GraphScene {
     this.particleMat = new THREE.ShaderMaterial({
       uniforms: {
         tPos: { value: null }, tEdges: { value: this.edgeTex }, tSeeds: { value: seeds }, uCount: { value: 0 }, uHot: { value: 0 },
-        uPR: { value: this.renderer.getPixelRatio() },
+        uPR: { value: this.renderer.getPixelRatio() }, uAspect: { value: 1 },
       },
       defines: { MAXE: MAX_EDGES.toFixed(1) },
       vertexShader: PARTICLE_VS, fragmentShader: PARTICLE_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -558,6 +558,7 @@ export class GraphScene {
     this.composer.setSize(w, h);
     this.bloom.setSize(w / 2, h / 2);
     this.camera.aspect = w / h;
+    if (this.particleMat) this.particleMat.uniforms.uAspect.value = w / h;
     this.camera.updateProjectionMatrix();
     this.layoutHud();
   }
@@ -648,7 +649,7 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float s = size * (state < 0.5 ? 0.8 : state > 2.5 ? 1.35 : 1.0);
   if (state > 3.5 && state < 4.5) s *= 1.25 + 0.12 * sin(uTime * 3.0);
-  gl_PointSize = s * uPR * 520.0 / -mv.z;
+  gl_PointSize = s * uPR * 880.0 / -mv.z;
   gl_Position = projectionMatrix * mv;
 }`;
 const NODE_FS = /* glsl */ `
@@ -656,17 +657,19 @@ varying vec3 vColor; varying float vState; varying float vShape;
 void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;
   float d = length(p);
+  float r = length(p);
   if (vShape > 0.5 && vShape < 1.5) d = max(abs(p.x), abs(p.y)) * 1.05;      // database: square
   if (vShape > 1.5 && vShape < 2.5) d = (abs(p.x) + abs(p.y)) * 0.85;        // external/change: diamond
-  float core = smoothstep(0.42, 0.34, d);
-  float ring = (vShape > 2.5) ? smoothstep(0.08, 0.0, abs(d - 0.38)) : 0.0;  // queue/mechanism/incident: ring
-  float halo = smoothstep(1.0, 0.2, d) * 0.35;
-  float a = (vShape > 2.5 ? ring + core * 0.35 : core) + halo;
+  float core = smoothstep(0.25, 0.2, d);
+  float hot = smoothstep(0.12, 0.0, d) * 0.6;                                   // white-hot centre
+  float ring = (vShape > 2.5) ? smoothstep(0.05, 0.0, abs(d - 0.23)) : 0.0;  // queue/mechanism/incident: ring
+  float halo = exp(-r * r * 5.5) * 0.7 + exp(-r * r * 20.0) * 0.4;           // two-layer soft glow
+  float a = (vShape > 2.5 ? ring + core * 0.35 : core) + halo * (vState < 0.5 ? 0.5 : 1.0);
   float k = vState < 0.5 ? 0.22 : vState < 1.5 ? 0.8 : vState < 2.5 ? 0.7 : 1.25;
   vec3 c = vColor * k;
-  if (vState > 3.5) { c = mix(c, vec3(1.0, 0.72, 0.27), vState > 4.5 ? 0.25 : 0.6) * 1.5; a += smoothstep(0.1, 0.0, abs(d - 0.7)) * 0.9; }
+  if (vState > 3.5) { c = mix(c, vec3(1.0, 0.72, 0.27), vState > 4.5 ? 0.25 : 0.6) * 1.5; a += smoothstep(0.05, 0.0, abs(d - 0.42)) * 0.9; }
   if (a < 0.01) discard;
-  gl_FragColor = vec4(c, a);
+  gl_FragColor = vec4(c + vec3(hot) * step(0.5, vState), min(a, 1.0));
 }`;
 const EDGE_VS = /* glsl */ `
 attribute vec4 color; attribute vec2 dash; varying vec4 vColor; varying vec2 vDash;
@@ -679,8 +682,8 @@ void main() {
 }`;
 const PICK_EDGE = /* glsl */ `
 float edgeIndex(vec4 seed, float count, float hot) {
-  // 45% of particles ride the edges emphasised by the current investigation step
-  if (hot > 0.0 && seed.z < 0.45) return floor(seed.x * hot);
+  // 60% of particles ride the edges emphasised by the current investigation step
+  if (hot > 0.0 && seed.z < 0.6) return floor(seed.x * hot);
   return floor(seed.x * max(count, 1.0));
 }`;
 const PARTICLE_SIM = /* glsl */ `
@@ -697,7 +700,7 @@ void main() {
   float t = p.w + uDt * b.w * (0.6 + seed.y * 0.8);
   bool wrapped = t >= 1.0;
   t = fract(t);
-  vec3 lane = (vec3(seed.y, seed.w, seed.z) - 0.5) * (a.w >= 0.5 ? 0.35 : 0.6);
+  vec3 lane = (vec3(seed.y, seed.w, seed.z) - 0.5) * (a.w >= 0.5 ? 0.22 : 0.5); // tight lanes read as a stream
   vec3 target = mix(a.xyz, b.xyz, t) + lane;
   vec3 pos = wrapped || length(p.xyz) < 0.0001 ? target : mix(p.xyz, target, 1.0 - exp(-uDt * 9.0));
   // alerting services disturb nearby particles (controlled jitter)
@@ -709,27 +712,43 @@ void main() {
 }`;
 const PARTICLE_VS = /* glsl */ `
 attribute vec2 ref;
-uniform sampler2D tPos; uniform sampler2D tEdges; uniform sampler2D tSeeds; uniform float uCount; uniform float uHot; uniform float uPR;
-varying vec3 vColor; varying float vAlpha;
+uniform sampler2D tPos; uniform sampler2D tEdges; uniform sampler2D tSeeds; uniform float uCount; uniform float uHot; uniform float uPR; uniform float uAspect;
+varying vec3 vColor; varying float vAlpha; varying vec2 vDir; varying float vHot;
 ${PICK_EDGE}
 void main() {
   vec4 p = texture2D(tPos, ref);
   vec4 seed = texture2D(tSeeds, ref);
   float ei = edgeIndex(seed, uCount, uHot);
-  float cls = texture2D(tEdges, vec2((ei + 0.5) / MAXE, 0.25)).w;
+  vec4 ea = texture2D(tEdges, vec2((ei + 0.5) / MAXE, 0.25));
+  vec4 eb = texture2D(tEdges, vec2((ei + 0.5) / MAXE, 0.75));
+  float cls = ea.w;
+  // direction of travel on screen, so each particle is drawn as a streak pointing along its edge
+  vec4 ca = projectionMatrix * modelViewMatrix * vec4(ea.xyz, 1.0);
+  vec4 cb = projectionMatrix * modelViewMatrix * vec4(eb.xyz, 1.0);
+  vec2 dv = (cb.xy / cb.w - ca.xy / ca.w) * vec2(uAspect, 1.0);
+  vDir = length(dv) > 1e-5 ? normalize(dv) : vec2(1.0, 0.0);
   vColor = cls >= 0.95 ? vec3(1.0, 0.55, 0.36) : cls >= 0.7 ? vec3(1.0, 0.72, 0.27) : cls >= 0.5 ? vec3(0.27, 0.83, 0.91)
          : cls >= 0.4 ? vec3(0.23, 0.56, 0.63) : vec3(0.36, 0.40, 0.52);
   float hotEdge = step(0.5, cls);
-  vAlpha = sin(p.w * 3.14159) * mix(uHot > 0.0 ? 0.12 : 0.3, 0.42, hotEdge) * step(ei, uCount - 1.0);
+  vHot = hotEdge;
+  vAlpha = sin(p.w * 3.14159) * mix(uHot > 0.0 ? 0.14 : 0.32, 0.8, hotEdge) * step(ei, uCount - 1.0);
   vec4 mv = modelViewMatrix * vec4(p.xyz, 1.0);
-  gl_PointSize = mix(1.3, 2.0, hotEdge) * uPR * 60.0 / -mv.z;
+  gl_PointSize = mix(2.4, 5.5, hotEdge) * uPR * 80.0 / -mv.z;
   gl_Position = projectionMatrix * mv;
 }`;
 const PARTICLE_FS = /* glsl */ `
-varying vec3 vColor; varying float vAlpha;
+varying vec3 vColor; varying float vAlpha; varying vec2 vDir; varying float vHot;
 void main() {
-  float d = length(gl_PointCoord * 2.0 - 1.0);
-  float a = smoothstep(1.0, 0.0, d) * vAlpha;
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  p.y = -p.y;
+  float u = dot(p, vDir), v = dot(p, vec2(-vDir.y, vDir.x));
+  // comet: compact bright head, long fading tail behind it (stream particles only; idle flow stays round)
+  float stretch = mix(1.0, 3.2, vHot);
+  float along = u > 0.0 ? u * stretch * 1.6 : u * 1.0;
+  float d = length(vec2(along, v * stretch));
+  float body = exp(-d * d * 5.0);
+  float head = exp(-d * d * 28.0) * 0.9;
+  float a = (body * 0.7 + head) * vAlpha;
   if (a < 0.01) discard;
-  gl_FragColor = vec4(vColor, a);
+  gl_FragColor = vec4(vColor * (1.0 + head * 0.8), a);
 }`;
