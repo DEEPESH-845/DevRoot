@@ -37,6 +37,10 @@ FALKORDB_URL=redis://localhost:6379 ./run.sh
 The seed loads at startup and is **idempotent**: every node is `MERGE`d on a stable `id`, and a unique constraint exists on `id` per label.
 To reset, stop the server and delete `data/`.
 
+**Deploy:** a `Dockerfile` (Debian trixie, since the falkordblite wheels need glibc ≥ 2.39) and a `render.yaml` blueprint are included:
+Render → New → Blueprint → this repo. Without `FALKORDB_URL`, a container's graph is ephemeral and the deterministic seed is re-loaded on every start.
+The Docker image build has not been run locally (Docker isn't installed on the dev machine).
+
 Dev mode with hot reload: run `cd backend && ../.venv/bin/uvicorn devroot.app:app --reload` and `cd frontend && npm run dev` (Vite proxies `/api`).
 
 ## Two-minute demo
@@ -66,6 +70,9 @@ Dev mode with hot reload: run `cd backend && ../.venv/bin/uvicorn devroot.app:ap
     DevRoot writes a fresh synthetic incident: a graph query picks the nearest synchronous caller as the place the symptom surfaces,
     and a decoy change closer in time lands on a service the symptom can't reach. The agent investigates without the answer key,
     and the verdict banner compares its #1 with the injected cause. **Reset drills** deletes everything the drill created.
+
+13. **Time travel:** drag the slider under the timeline. The graph shows only the changes, signals and alerts recorded at or before that minute,
+    drawn on their real `DEPLOYED_TO` / `OBSERVED_IN` / `FIRED_ON` edges. At 13:55 UTC, three deployments are live and nothing has fired yet.
 
 The demo needs no network access and no API keys.
 
@@ -294,4 +301,4 @@ The tests cover:
 - One seeded scenario. Real telemetry would need ingestion adapters (none are implemented).
 - The score weights are heuristics. Signal-to-mechanism (`INDICATES`) and change-to-mechanism (`TOUCHES`) links are seeded by hand; in production they would come from a classifier or rules.
 - The candidate scope is the changed service plus its direct dependencies; longer causal chains need a wider scope.
-- No live deployment yet.
+- No live deployment yet: the Railway account available during the build had an expired trial. The Dockerfile and render.yaml are ready but untested.

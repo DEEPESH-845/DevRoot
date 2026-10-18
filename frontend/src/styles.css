@@ -166,3 +166,7 @@ select { width: 100%; margin-bottom: 6px; background: var(--bg); color: var(--te
 .drill-verdict { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; }
 .drill-verdict.ok { background: #0f1d16; border: 1px solid #23503a; color: #b9f0d2; }
 .drill-verdict.bad { background: #1a0f10; border: 1px solid #4a2020; }
+
+#scrub { position: absolute; left: 2%; width: 96%; bottom: -9px; margin: 0; accent-color: var(--violet); cursor: ew-resize; }
+.scrub-label { position: absolute; left: 50%; transform: translateX(-50%); bottom: -16px; font: 10px var(--mono); color: var(--dim); white-space: nowrap; pointer-events: none; }
+.tick.future { opacity: .15; }

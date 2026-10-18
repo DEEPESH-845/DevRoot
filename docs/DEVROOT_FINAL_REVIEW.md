@@ -16,7 +16,8 @@
 
 ## Wow-factor sprint (see DEVROOT_WOW_PLAN.md)
 Built: graph-algorithm criticality (A), human-approved graph-recorded actions (B), MCP server (C), fire drills (D).
-Skipped: temporal scrubber, LLM narrator, what-if topology edits.
+Also built: temporal scrubber (graph state at time T from recorded event timestamps).
+Skipped: LLM narrator, what-if topology edits.
 
 Found while building:
 - `algo.betweenness` is **sampled**: payment-service scored 19, 22 and 27 across processes. Fixed by pinning `samplingSeed`; documented as an estimate.
@@ -51,7 +52,7 @@ Playwright (Chromium 1243, 1600×960 and 390×844):
 - Score weights are uncalibrated; no accuracy is claimed.
 - Actions are recorded in DevRoot's graph only; there is no pager or CI integration.
 - No LLM (none configured). The narrative is a template over query rows.
-- No live deployment; no demo video recorded yet (both required for submission).
+- No live deployment: Railway trial expired; Dockerfile + render.yaml are prepared but the image was never built (no Docker locally). No demo video yet.
 - Browser tests are an ad-hoc Playwright script, not committed CI.
 - The GPU particle path was verified in desktop Chromium only (Metal/ANGLE). Safari/Firefox are untested.
 - `/api/entity/{id}` matches without a label (fine at 70 nodes; would need a label hint at scale).

@@ -307,7 +307,33 @@ function renderTimeline() {
     ${items.map((e, i) => `<button class="tick k-${esc(e.kind)} s-${esc(e.stance)}" style="left:${x(e.ts)};top:${8 + (i % 4) * 14}px" data-focus="${esc(e.id)}"
        title="${esc(`${hhmm(e.at)} ${e.id} ${e.detail}`)}" aria-label="${esc(`${hhmm(e.at)} ${e.kind} ${e.id}`)}"></button>`).join('')}
     <span class="lbl" style="left:0">${new Date(t0 * 1000).toISOString().slice(11, 16)} UTC</span>
-    <span class="lbl" style="right:0">${new Date(t1 * 1000).toISOString().slice(11, 16)} UTC</span></div>`;
+    <span class="lbl" style="right:0">${new Date(t1 * 1000).toISOString().slice(11, 16)} UTC</span>
+    <input type="range" id="scrub" min="${t0}" max="${t1}" step="60" value="${t1}" aria-label="Show the graph as it was at a point in time">
+    <span id="scrub-label" class="scrub-label">Drag to see the graph at any moment</span></div>`;
+  $('#scrub').addEventListener('input', e => scrubTo(Number((e.target as HTMLInputElement).value)));
+}
+
+/** Temporal view: only events recorded at or before T, drawn on the real edges that connect them to their service. */
+function scrubTo(T: number) {
+  if (!result) return;
+  clearInterval(timer); timer = 0;
+  cursor = scenes.length;
+  const live = result.evidence.filter(e => e.ts <= T);
+  document.querySelectorAll<HTMLElement>('.tick').forEach(el => {
+    const e = result!.evidence.find(x => x.id === el.dataset.focus);
+    el.classList.toggle('future', !!e && e.ts > T);
+  });
+  scene?.apply(scenes, {
+    path: live.map(e => [e.id, e.service] as [string, string]),
+    focus: [...new Set(live.flatMap(e => [e.id, e.service]))],
+    particles: T >= result.incident.ts ? 'blast' : 'trace',
+  });
+  const count = (k: string[]) => live.filter(e => k.includes(e.kind)).length;
+  const at = new Date(T * 1000).toISOString().slice(11, 16);
+  const rel = T < result.incident.ts ? `${Math.round((result.incident.ts - T) / 60)} min before incident start` : 'after incident start';
+  $('#scrub-label').textContent = `${at} UTC · ${count(['change'])} changes · ${count(['metric', 'log'])} signals · ${count(['alert'])} alerts · ${rel}`;
+  setStatus('Time travel', `Graph state at ${at} UTC (${rel})`);
+  renderSteps();
 }
 
 // ------------------------------------------------------------------ focus, blast, rollback

@@ -1,0 +1,7 @@
+# One-click deploy: Render dashboard → New → Blueprint → select this repo.
+services:
+  - type: web
+    name: devroot
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
