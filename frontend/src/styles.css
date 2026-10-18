@@ -350,3 +350,9 @@ body.pixel .legend, body.pixel .phase-line, body.pixel .inspector { display: non
 .inside .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
 .inside h3 { font: var(--t-meta); color: var(--faint); margin-top: 8px; }
 @media (max-width: 960px) { .lens { width: auto; right: var(--s3); left: var(--s3); max-height: 40%; } }
+
+.plain { font: 500 15.5px/1.55 var(--sans); color: var(--text); margin-bottom: var(--s4); padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.plain .id { font-size: 13.5px; color: #cfc4ff; }
+.steps button { min-width: 0; padding: 0 10px; white-space: nowrap; flex: 0 0 auto; }
+.flow-key { display: flex; gap: 12px; flex-basis: 100%; justify-content: flex-end; }
+.flow-key i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }

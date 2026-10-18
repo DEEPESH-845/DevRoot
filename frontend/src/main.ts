@@ -225,6 +225,9 @@ function suggestions() {
   return `<div class="suggest">${qs.map(q => `<button data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`;
 }
 
+const STEP_NAMES: Record<string, string> = { intent: 'Read request', context: 'Find alerts', frontier: 'Walk dependencies', candidates: 'Collect changes',
+  evidence: 'Match evidence', history: 'Check history', ranking: 'Rank causes', blast: 'Blast radius', complete: 'Answer' };
+const TERM_NAMES: Record<string, string> = { temporal: 'timing', reachability: 'dependency path', corroboration: 'matching signals', mechanism: 'known failure mode', history: 'seen before' };
 const TERM_COLORS: Record<string, string> = { temporal: '#8d82cf', reachability: '#3fd0e0', corroboration: '#9de8f0', mechanism: '#f2b04c', history: '#c99a5c' };
 const TERM_MAX: Record<string, number> = { temporal: 20, reachability: 20, corroboration: 30, mechanism: 20, history: 10 };
 const termBar = (c: Candidate) => `<div class="bar" role="img" aria-label="${Object.entries(c.terms).map(([k, v]) => `${k} ${v} of ${TERM_MAX[k]}`).join(', ')}">
@@ -266,14 +269,23 @@ function diagnosis(): string {
     <h3>What argues against it</h3><ul class="con">${con.length ? con.map(x => `<li>${x}</li>`).join('') : '<li>Nothing in the graph contradicts it yet.</li>'}</ul>
     <h3>What we still don't know</h3><ul class="unk">${unk.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
   const runner = r.candidates[1];
+  const lead = r.evidence_chain[0];
+  const cfg = top.contents.find(x => x.id === lead?.element) ?? top.contents.find(x => x.rel === 'SHIPS');
+  const fmName = (r as any).mechanisms?.[lead?.fm]?.name;
+  const plain = supported
+    ? `Most likely, ${esc(top.service_name)} ${cfg ? `changed <span class="id">${esc(cfg.name)}</span>` : `deployed ${esc(top.name)}`} at ${hhmm(top.at)} UTC.
+       ${fmName ? `Right after, its own metrics and logs showed ${esc(fmName)}.` : ''}
+       ${r.symptoms.length > 1 ? `${esc(r.symptoms.map(svcName).join(' and '))} depend on it, so they slowed down` : `${esc(svcName(r.symptoms[0]))} depends on it, so it slowed down`} and alerted ${mins} minutes later.`
+    : `The graph does not hold enough evidence to name a cause. The best candidate is ${esc(top.id)}, but it misses the evidence bar.`;
   return `<section class="verdict">
+    <p class="plain">${plain}</p>
     <div class="state">${supported ? '<span class="badge hypothesis">Leading hypothesis</span> <span class="meta">supported by graph evidence, not verified</span>'
       : '<span class="badge neutral">Insufficient evidence</span> <span class="meta">no candidate meets the evidence bar</span>'}</div>
     <h1>${ref(top.id)} ${esc(top.name)}</h1>
     <p class="where">${top.label === 'Deployment' ? 'Deployed to' : 'Applied to'} ${esc(top.service_name)} at ${hhmm(top.at)} UTC,
       ${mins >= 0 ? `${mins} min before the incident started` : `${-mins} min after the incident started`}.</p>
     <div class="score"><span class="num">${top.score}<small>/100</small></span>${termBar(top)}
-      <div class="terms">${Object.entries(top.terms).map(([k, v]) => `<span><i style="background:${TERM_COLORS[k]}"></i>${k} ${v}</span>`).join('')}
+      <div class="terms">${Object.entries(top.terms).map(([k, v]) => `<span><i style="background:${TERM_COLORS[k]}"></i>${TERM_NAMES[k]} ${v}/${TERM_MAX[k]}</span>`).join('')}
       <span class="note">Heuristic evidence score, not a probability.${runner ? ` Runner-up ${esc(runner.id)} scored ${runner.score}.` : ''}</span></div></div>
     ${chainHtml()}
     ${reasons}
@@ -423,7 +435,7 @@ function renderLens() {
 
 function renderTransport() {
   $('#steps').innerHTML = scenes.map((s, i) => `<li><button data-step="${i + 1}" class="${i < cursor - 1 ? 'done' : ''} ${i === cursor - 1 ? 'cur' : ''}"
-    title="${esc(s.title)}" aria-label="Step ${s.seq}: ${esc(s.title)}" ${i === cursor - 1 ? 'aria-current="step"' : ''}>${esc(s.phase)}</button></li>`).join('');
+    title="${esc(s.title)}" aria-label="Step ${s.seq}: ${esc(s.title)}" ${i === cursor - 1 ? 'aria-current="step"' : ''}>${i + 1}. ${esc(STEP_NAMES[s.phase] ?? s.phase)}</button></li>`).join('');
   ($('#r-prev') as HTMLButtonElement).disabled = cursor <= 1;
   ($('#r-next') as HTMLButtonElement).disabled = cursor >= scenes.length;
   ($('#r-play') as HTMLButtonElement).disabled = !scenes.length || run === 'running';
