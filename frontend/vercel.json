@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npx vite build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://declared-forecast-arrested-reservation.trycloudflare.com/api/:path*" }
+  ]
+}
